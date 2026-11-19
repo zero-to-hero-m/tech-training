@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>焊缝缺陷分析端数字化看板 · 诊断→优化→验证→反馈闭环</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- 顶栏：诊断→优化→验证→反馈 闭环 + 自主可控 -->
+<div class="topbar">
+  <h1>焊缝缺陷分析端<span>数字化看板</span></h1>
+  <div class="loop">
+    <span class="node">① 诊断</span><span class="arrow">▶</span>
+    <span class="node">② 优化</span><span class="arrow">▶</span>
+    <span class="node">③ 验证</span><span class="arrow">▶</span>
+    <span class="node">④ 反馈</span>
+  </div>
+  <div class="sovereign">
+    <span class="flag">🛡️</span>
+    <span><b>核心技术握在自己手里<small>国产工业大模型 · 数据不出厂区 · 自主可控</small></b></span>
+  </div>
+  <button class="replay" id="replayBtn">▶ 重新演示</button>
+</div>
+
+<div class="grid">
+  <!-- ① 成因诊断区 -->
+  <div class="panel">
+    <h2><span class="tag">① 诊断</span>成因诊断区 · 工业大模型诊断结论<span class="src">数据源：检测组 100+ 张缺陷图像 + 对应工艺参数</span></h2>
+    <div class="body">
+      <div class="diag">
+        <div class="llm-box">
+          <div class="hd"><span class="pulse"></span><span class="status-txt" id="llmStatus">国产工业大模型 · 推理中<span class="stream">✦</span></span></div>
+          <div class="concl" id="concl"></div>
+          <div class="meta">输入：<span id="imgCnt">0</span> 张缺陷图像及对应工艺参数｜依据：焊接工艺知识库 · 对比上千条工艺记录</div>
+        </div>
+        <div class="diag-kv">
+          <div class="cause"><div class="c1">⚡ 焊接电流偏移 +8A</div><div class="c2">电流偏大 → 电弧吹力增强，母材边缘被吹削成咬边沟槽</div></div>
+          <div class="cause"><div class="c1">🎯 焊枪角度偏差 2°</div><div class="c2">角度偏移 → 热量分布不均，一侧熔化过度</div></div>
+          <div class="cause" style="border-style:dashed"><div class="c1">📚 诊断依据</div><div class="c2">焊接工艺知识库 · 上千条历史工艺记录比对</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ④ 缺陷分布区 -->
+  <div class="panel">
+    <h2><span class="tag">④ 分布</span>缺陷分布区 · 占比与成因归因<span class="src">数据源：检测组缺陷数据（100+ 张图像）</span></h2>
+    <div class="body">
+      <div class="dist">
+        <div class="dbar">
+          <div class="row"><div class="name"><span>🔥 焊穿 <span class="cause-tag">→ 电流过大 / 送丝过快</span></span><b>40%</b></div>
+            <div class="track"><div class="fill" style="width:40%;background:#d64541"></div></div></div>
+          <div class="row"><div class="name"><span>⛔ 未焊透 <span class="cause-tag">→ 电流偏小 / 焊速过快</span></span><b>40%</b></div>
+            <div class="track"><div class="fill" style="width:40%;background:#e8890c"></div></div></div>
+          <div class="row"><div class="name"><span>🩹 咬边 <span class="cause-tag">→ 电流偏大+焊枪角度偏差（本次诊断对象）</span></span><b>20%</b></div>
+            <div class="track"><div class="fill" style="width:20%;background:#7451c9"></div></div></div>
+        </div>
+        <div class="dist-legend">
+          <b>归因链路</b><br>
+          缺陷图像 → 匹配工艺参数<br>
+          → 大模型归因 → 分类统计<br>
+          <span style="color:var(--purple);font-weight:bold">▶ 本次锁定咬边（20%）</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="grid">
+  <!-- ② 参数优化区 -->
+  <div class="panel">
+    <h2><span class="tag">② 优化</span>参数优化区 · 优化前后并列对比<span class="src">数据源：大模型输出的参数优化方案</span></h2>
+    <div class="body">
+      <div class="duo">
+        <div class="pcard before">
+          <span class="chip">优化前</span>
+          <div class="pt">焊接电流</div>
+          <div class="pv">120<small class="pu">A</small></div>
+          <div class="pe">电流偏大 +8A</div>
+        </div>
+        <div class="duo-arrow" id="arrow1"><div class="a">➜</div><div class="d">大模型优化方案</div></div>
+        <div class="pcard after" id="card1">
+          <span class="chip">优化后</span>
+          <div class="pt">焊接电流</div>
+          <div class="pv"><span id="pvCurrent">120</span><small class="pu">A</small></div>
+          <div class="pe" id="peCurrent">等待优化方案…</div>
+        </div>
+      </div>
+      <div class="duo" style="margin-top:10px">
+        <div class="pcard before">
+          <div class="pt">焊枪角度</div>
+          <div class="pv" style="font-size:24px">偏差 2°</div>
+          <div class="pe">角度偏离工艺基准</div>
+        </div>
+        <div class="duo-arrow" id="arrow2"><div class="a">➜</div><div class="d">大模型优化方案</div></div>
+        <div class="pcard after" id="card2">
+          <div class="pt">焊枪角度</div>
+          <div class="pv" style="font-size:24px"><span id="pvAngle">偏差 2°</span></div>
+          <div class="pe" id="peAngle">等待优化方案…</div>
+        </div>
+      </div>
+      <div class="opt-note"><b>优化方案输出逻辑：</b>工业大模型（国产）基于焊接工艺知识库，比对上千条工艺记录，输出"电流 120A→128A、焊枪角度修正 2°"的参数优化方案。</div>
+    </div>
+  </div>
+
+  <!-- ③ 效果验证区 -->
+  <div class="panel">
+    <h2><span class="tag">③ 验证</span>效果验证区 · 缺陷率优化前后对比<span class="src">数据源：机械臂按优化参数重走焊接轨迹的实测结果</span></h2>
+    <div class="body">
+      <div class="val-flex">
+        <div class="rate-compare">
+          <div class="rcol b4"><div class="bar" id="barBefore"><span class="v" id="vBefore">0%</span></div><div class="cap">优化前缺陷率</div></div>
+          <div class="rcol af"><div class="bar" id="barAfter"><span class="v" id="vAfter">0%</span></div><div class="cap">优化后缺陷率</div></div>
+        </div>
+        <div class="val-side">
+          <div class="drop"><span id="dropNum">0</span> pct<small>缺陷率 13% → 5%，相对下降约 62%</small></div>
+          <div class="val-chip"><b>✔ 验证方式</b>机械臂按优化参数<b>重走焊接轨迹</b>，逐段实测缺陷率</div>
+          <div class="val-chip"><b>✔ 验证结论</b>优化参数有效，转入闭环反馈</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="grid3">
+  <!-- ⑤ 闭环反馈区 -->
+  <div class="panel" style="grid-column:1/3">
+    <h2><span class="tag">⑤ 反馈</span>闭环反馈区 · 优化参数 → 检测组反馈状态<span class="src">数据源：分析组 → 检测组 联动记录</span></h2>
+    <div class="body">
+      <div class="loopflow">
+        <div class="lf-node lf-1" id="lf1"><div class="t">📤 优化参数回传</div><div class="d">电流 128A · 角度修正 2°<br>推送至检测组</div></div>
+        <div class="lf-a" id="lfa1">▶</div>
+        <div class="lf-node lf-2" id="lf2"><div class="t">🔄 检测标准同步调整</div><div class="d">检测端按新工艺参数<br>更新判定基准</div></div>
+        <div class="lf-a" id="lfa2">▶</div>
+        <div class="lf-node lf-3" id="lf3"><div class="t">🤝 两组闭环</div><div class="d">检测组 ⇄ 分析组<br>数据与标准双向流动</div></div>
+      </div>
+      <div class="sync">
+        <div class="sync-item" id="sync1"><span class="blink-ok"></span>优化参数回传状态：<span class="ok">已送达检测组</span></div>
+        <div class="sync-item" id="sync2"><span class="blink-ok"></span>检测标准同步调整：<span class="ok">已完成</span></div>
+        <div class="sync-item" id="sync3"><span class="blink-ok"></span>闭环确认：<span class="ok">两组联动就绪，持续跟踪缺陷率</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑥ 数据安全区 -->
+  <div class="panel">
+    <h2><span class="tag">⑥ 安全</span>数据安全区 · 自主可控<span class="src">表4：国产大模型，数据不出厂区</span></h2>
+    <div class="body">
+      <div class="sec">
+        <svg class="shield" viewBox="0 0 96 110">
+          <path d="M48 4 L88 18 V52 C88 80 70 98 48 106 C26 98 8 80 8 52 V18 Z"
+            fill="#eefaf3" stroke="#1fa363" stroke-width="3"/>
+          <path d="M48 12 L80 23 V52 C80 75 66 91 48 98 C30 91 16 75 16 52 V23 Z"
+            fill="none" stroke="#bfe6d2" stroke-width="1.5"/>
+          <text x="48" y="52" text-anchor="middle" style="font-size:15px;font-weight:800;fill:#1fa363">国产</text>
+          <text x="48" y="72" text-anchor="middle" style="font-size:13px;font-weight:bold;fill:#1f7a52">大模型</text>
+        </svg>
+        <div class="sec-txt">
+          <span class="hl">核心技术握在自己手里：</span>
+          成因诊断由<b>国产工业大模型</b>完成，全部缺陷图像与工艺参数在<b>厂区内闭环处理</b>，不出厂、不上公有云。
+          <div class="badges">
+            <span class="badge">🔒 数据不出厂区</span>
+            <span class="badge">🇨🇳 国产大模型</span>
+            <span class="badge">📚 自建工艺知识库</span>
+            <span class="badge">⚙️ 自主可控</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">分析端闭环看板 · 诊断(国产大模型) → 优化(参数双值对比) → 验证(机械臂重走焊接轨迹 13%→5%) → 反馈(优化参数回传检测组、检测标准同步调整) ｜ <b>数据不出厂区 · 自主可控</b></div>
+
+<script type="module">
+  import { init } from './js/dashboard.js';
+  init();
+</script>
+</body>
+</html>
