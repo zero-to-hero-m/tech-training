@@ -106,9 +106,9 @@ export function drawDepthFrame(canvas) {
   barGrad.addColorStop(1,   '#0044aa');
   ctx.fillStyle = barGrad;
   ctx.fillRect(w - 9, 0, 8, h);
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '10.5px "PingFang SC", "Microsoft YaHei", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('近', w - 5, 10);
-  ctx.fillText('远', w - 5, h - 4);
+  ctx.textAlign = 'right';
+  ctx.fillText('近', w - 13, 12);
+  ctx.fillText('远', w - 13, h - 4);
 }

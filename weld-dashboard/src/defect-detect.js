@@ -6,24 +6,29 @@
  */
 
 import { DET_CONFIG, DEFECT_TYPES } from './config.js';
-import { fitCanvas, pick, chance, randFloat, hexToRgba } from './utils.js';
+import { fitCanvas, pick, chance, randFloat, hexToRgba, nowTimeString } from './utils.js';
+import { state, emit, EVT } from './event-bus.js';
 
 // ========== 模块状态 ==========
 let blocks = [];
-let blockId = 0;
+let detectCanvasRef = null;  // 保存画布引用，供「检测当前帧」定位检测区
+let beltPhase = 0;           // 传送带纹理相位（停机静止）
 
 /**
- * 生成新方块
+ * 生成一个新方块（每个方块携带一个全局唯一的工件编号）
+ * defect 代表工件客观上是否带缺陷（相机画面里真实存在），
+ * judged 代表是否已被检测判定——只有人工/批量检测后才会置为 true。
  */
 function spawnBlock() {
-  blockId++;
+  const workpieceId = state.workpieceSeq++;
   const isDefect = chance(DET_CONFIG.DEFECT_RATE);
   const defectType = isDefect ? pick(['burn', 'lack', 'bite']) : null;
   const conf = isDefect
     ? randFloat(0.85, 0.98)
     : randFloat(0.92, 0.99);
   blocks.push({
-    id: blockId,
+    id: workpieceId,
+    workpieceId,
     x: -DET_CONFIG.BLOCK_W,
     w: DET_CONFIG.BLOCK_W,
     h: DET_CONFIG.BLOCK_H,
@@ -31,9 +36,97 @@ function spawnBlock() {
     defect: defectType,
     conf: conf,
     inspected: false,
+    judged: false,   // 是否已被检测判定（人工触发）
     flash: 0,
     _flashed: false,
   });
+}
+
+/**
+ * 判定一个工件并广播结果，驱动下游闭环（统计/样本库/机械臂/分析端）
+ * 置信度阈值：缺陷置信度低于阈值为「漏检」，按合格放行——体现阈值实验语义。
+ * @param {object} b 工件方块
+ * @returns {object} 判定结果
+ */
+function dispatchResult(b) {
+  b.judged = true;
+  b.flash = 1;
+  b._flashed = true;
+  const time = nowTimeString();
+  const threshold = state.confThreshold ?? 0.5;
+  // 阈值过滤：缺陷但置信度不足 → 漏检，按合格放行
+  const effectiveDefect = b.defect && b.conf >= threshold ? b.defect : null;
+  if (effectiveDefect) {
+    const info = DEFECT_TYPES[effectiveDefect];
+    const payload = {
+      workpieceId: b.workpieceId,
+      type: effectiveDefect,
+      cn: info.cn,
+      color: info.color,
+      label: info.label,
+      conf: b.conf,
+      time,
+    };
+    state.defects.push(payload);
+    state.lastDefect = payload;
+    emit(EVT.DEFECT, payload);
+    return payload;
+  }
+  const payload = { workpieceId: b.workpieceId, conf: b.conf, time };
+  emit(EVT.OK, payload);
+  return payload;
+}
+
+/**
+ * 检测当前帧：对检测区内尚未判定的工件做一次识别
+ * 由「检测当前帧」按钮调用。若检测区为空则返回 null。
+ */
+export function detectCurrentFrame() {
+  const zoneL = (detectCanvasRef?.clientWidth || 0) * 0.15;
+  const zoneR = (detectCanvasRef?.clientWidth || 0) * 0.85;
+  // 优先判定检测区内未判定的工件；若都已判定，则取区内最后一个工件复检
+  let target = blocks.find(b => b.x > zoneL && b.x < zoneR && !b.judged);
+  if (!target) target = [...blocks].reverse().find(b => b.x > zoneL && b.x < zoneR);
+  if (!target) return null;
+  return dispatchResult(target);
+}
+
+/**
+ * 批量检测：对一批采集照片逐张判定并广播，返回统计
+ * 由「批量检测」按钮调用。判定结果由采集时记录的客观缺陷决定。
+ * @param {Array} shots captureBatch 产生的照片记录
+ */
+export function detectBatchFrames(shots) {
+  const stats = { total: shots.length, ok: 0, defect: 0, burn: 0, lack: 0, bite: 0, missed: 0 };
+  const threshold = state.confThreshold ?? 0.5;
+  shots.forEach((shot) => {
+    const time = nowTimeString();
+    const conf = shot.conf ?? randFloat(0.85, 0.98);
+    // 阈值过滤：缺陷但置信度不足 → 漏检（记为合格放行，但统计 missed）
+    const effectiveDefect = shot.type && DEFECT_TYPES[shot.type] && conf >= threshold ? shot.type : null;
+    if (shot.type && !effectiveDefect) stats.missed++;
+    if (effectiveDefect) {
+      const info = DEFECT_TYPES[effectiveDefect];
+      const payload = {
+        workpieceId: shot.workpieceId,
+        type: effectiveDefect,
+        cn: info.cn,
+        color: info.color,
+        label: info.label,
+        conf,
+        time,
+      };
+      state.defects.push(payload);
+      state.lastDefect = payload;
+      emit(EVT.DEFECT, payload);
+      stats.defect++;
+      stats[effectiveDefect]++;
+    } else {
+      emit(EVT.OK, { workpieceId: shot.workpieceId, conf, time });
+      stats.ok++;
+    }
+  });
+  return stats;
 }
 
 /**
@@ -51,6 +144,7 @@ function initBlocks() {
  * @param {HTMLCanvasElement} canvas
  */
 export function drawDetectFrame(canvas) {
+  detectCanvasRef = canvas;
   const { w, h } = fitCanvas(canvas);
   const ctx = canvas.getContext('2d');
 
@@ -72,8 +166,9 @@ export function drawDetectFrame(canvas) {
   ctx.fillStyle = beltGrad;
   ctx.fillRect(0, beltY, w, h - beltY);
 
-  // 传送带纹理
-  const beltOffset = (Date.now() * 0.06) % 24;
+  // 传送带纹理（停机时静止）
+  if (state.beltRunning) beltPhase += DET_CONFIG.BLOCK_SPEED;
+  const beltOffset = beltPhase % 24;
   ctx.strokeStyle = 'rgba(50,50,55,0.5)';
   ctx.lineWidth = 1;
   for (let bx = -24; bx < w + 24; bx += 24) {
@@ -105,25 +200,13 @@ export function drawDetectFrame(canvas) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  ctx.fillStyle = 'rgba(0,184,212,0.4)';
-  ctx.font = 'bold 13.5px "PingFang SC", "Microsoft YaHei", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('YOLO DETECTION ZONE', (inspectL + inspectR) / 2, 14);
-
-  // 顶部相机标识
-  ctx.fillStyle = 'rgba(0,184,212,0.12)';
-  ctx.fillRect(w / 2 - 30, 2, 60, 14);
-  ctx.strokeStyle = 'rgba(0,184,212,0.3)';
-  ctx.strokeRect(w / 2 - 30, 2, 60, 14);
-  ctx.fillStyle = 'rgba(0,184,212,0.6)';
-  ctx.font = '12px "PingFang SC", "Microsoft YaHei", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('D435i -> YOLO', w / 2, 12);
+  // 标题统一由 HTML 的 .cam-label 呈现，画布内不再重复绘制，避免文字堆叠
 
   // ---------- 方块更新与绘制 ----------
   for (let bi = blocks.length - 1; bi >= 0; bi--) {
     const b = blocks[bi];
-    b.x += b.speed;
+    // 传送带停止时工件驻留
+    if (state.beltRunning) b.x += b.speed;
     if (b.flash > 0) b.flash -= 0.05;
     if (b.x > w + DET_CONFIG.BLOCK_W) {
       blocks.splice(bi, 1);
@@ -178,12 +261,18 @@ export function drawDetectFrame(canvas) {
     // ---------- 检测结果 ----------
     if (b.x > inspectL && b.x < inspectR) {
       b.inspected = true;
-      if (b.flash === 0 && !b._flashed) {
-        b.flash = 1;
-        b._flashed = true;
-      }
-
-      if (b.defect) {
+      if (!b.judged) {
+        // 待人工检测：显示扫描虚框，尚未给出判定结果（不再自动播事件）
+        ctx.strokeStyle = 'rgba(56,189,248,0.4)';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([3, 3]);
+        ctx.strokeRect(b.x - 2, blockY - 2, b.w + 4, b.h + 4);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(56,189,248,0.65)';
+        ctx.font = 'bold 11px "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('待检', b.x + b.w / 2, blockY - 6);
+      } else if (b.defect) {
         const info = DEFECT_TYPES[b.defect];
 
         // 闪光
@@ -265,23 +354,19 @@ export function drawDetectFrame(canvas) {
       ctx.setLineDash([]);
     }
 
-    // 工件编号
-    if (b.x > 30 && b.x < w - 30) {
-      ctx.fillStyle = 'rgba(150,160,170,0.4)';
-      ctx.font = '12px "PingFang SC", "Microsoft YaHei", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`#W${String(b.id).padStart(4, '0')}`, b.x + b.w / 2, beltY + 14);
-    }
+    // 工件编号已由下方良品率追溯徽标统一呈现，画面内不再重复绘制
   }
 
-  // ---------- 生成新方块 ----------
-  if (blocks.length > 0) {
-    const last = blocks[blocks.length - 1];
-    if (last.x >= DET_CONFIG.BLOCK_GAP - DET_CONFIG.BLOCK_W && blocks.length < DET_CONFIG.MAX_VISIBLE) {
+  // ---------- 生成新方块（仅传送带运行时，停机不补件） ----------
+  if (state.beltRunning) {
+    if (blocks.length > 0) {
+      const last = blocks[blocks.length - 1];
+      if (last.x >= DET_CONFIG.BLOCK_GAP - DET_CONFIG.BLOCK_W && blocks.length < DET_CONFIG.MAX_VISIBLE) {
+        spawnBlock();
+      }
+    } else {
       spawnBlock();
     }
-  } else {
-    spawnBlock();
   }
 
   // ---------- 底部状态条 ----------
@@ -294,21 +379,16 @@ export function drawDetectFrame(canvas) {
   ctx.lineTo(w, h - 22);
   ctx.stroke();
 
-  const defTotal = blocks.filter(b => b.defect && b.inspected).length;
-  const okTotal = blocks.filter(b => !b.defect && b.inspected).length;
+  const defTotal = blocks.filter(b => b.defect && b.judged).length;
+  const okTotal = blocks.filter(b => !b.defect && b.judged).length;
 
-  ctx.fillStyle = 'rgba(74,222,128,0.7)';
-  ctx.font = 'bold 15px "PingFang SC", "Microsoft YaHei", sans-serif';
+  // 底部状态条只保留 OK / NG 计数，模型信息已由面板标题呈现
+  ctx.font = 'bold 13px "PingFang SC", "Microsoft YaHei", sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(`OK: ${okTotal}`, 8, h - 7);
-
-  ctx.fillStyle = 'rgba(248,113,113,0.7)';
-  ctx.fillText(`NG: ${defTotal}`, 70, h - 7);
-
-  ctx.fillStyle = 'rgba(148,163,184,0.6)';
-  ctx.font = '13.5px "PingFang SC", "Microsoft YaHei", sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillText('MODEL: YOLOv8  |  FPS: 15  |  CONF THR: 0.50', w - 8, h - 7);
+  ctx.fillStyle = 'rgba(74,222,128,0.85)';
+  ctx.fillText(`OK ${okTotal}`, 10, h - 7);
+  ctx.fillStyle = 'rgba(248,113,113,0.85)';
+  ctx.fillText(`NG ${defTotal}`, 78, h - 7);
 }
 
 /**

@@ -4,6 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>焊缝缺陷智能检测端数字化看板</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230b1422'/><text x='16' y='23' font-size='20' font-weight='bold' text-anchor='middle' fill='%2338bdf8'>W</text></svg>">
+
+  <!-- 禁用缓存：确保每次刷新都加载最新代码（避免改了 JS 仍看到旧行为） -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+
+  <!-- 同步标记：让需要入场动画的元素先隐藏，避免首屏闪现 -->
+  <script>document.documentElement.classList.add('js-ready');</script>
 
   <!-- ====== 唯一 CSS 入口 ====== -->
   <link rel="stylesheet" href="./css/weld-dashboard.css">
@@ -15,7 +24,7 @@
   <div class="header">
     <div class="header-left">
       <div class="header-logo">W</div>
-      <div class="header-title">焊缝缺陷智能检测看板<span class="sub">· 检测端</span></div>
+      <div class="header-title">焊缝缺陷智能检测看板<span class="sub">· 检测—分析双闭环</span></div>
     </div>
     <div class="header-right">
       <div class="item"><span class="dot"></span> 系统在线</div>
@@ -25,267 +34,361 @@
     </div>
   </div>
 
-  <!-- ====== 主体三栏 ====== -->
+  <!-- ====== 主体：检测端 / 分析端 双闭环 ====== -->
   <div class="main">
 
-    <!-- ===== 左栏 ===== -->
-    <div class="col-left">
-      <!-- ① 实时采集区 -->
-      <div class="panel" style="flex:1.1">
-        <div class="panel-title">
-          <span><span class="icon">📷</span>实时采集区</span>
-          <span class="tag">D435i · LIVE</span>
-        </div>
-        <div class="panel-body" style="padding:8px">
-          <div class="cam-container">
-            <div class="cam-view cam-rgb">
-              <canvas class="weld-rgb-canvas" id="rgbCanvas"></canvas>
-              <div class="cam-label"><span class="live-dot"></span>CAM-D435i RGB</div>
-              <div class="cam-fps" id="fpsLabel">15 FPS</div>
-              <div class="cam-scanline"></div>
+    <!-- ============== 第一带：检测端 ============== -->
+    <div class="band">
+      <div class="band-label">
+        <span class="band-id detect">01</span>
+        <span class="band-name">检测端</span>
+        <span class="band-flow">采集 → 识别 → 分拣剔除 → 质量追溯</span>
+        <span class="band-line"></span>
+      </div>
+      <div class="band-grid">
+
+        <!-- ① 实时采集区 -->
+        <div class="panel p-capture">
+          <div class="panel-title">
+            <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></span>实时采集区</span>
+            <span class="tag">D435i · LIVE</span>
+          </div>
+          <div class="panel-body" style="padding:8px">
+            <div class="cam-container">
+              <div class="cam-view cam-rgb">
+                <canvas class="weld-rgb-canvas" id="rgbCanvas"></canvas>
+                <div class="cam-label"><span class="live-dot"></span>CAM-D435i RGB</div>
+                <div class="cam-fps" id="fpsLabel">15 FPS</div>
+                <div class="shot-preview" id="shotPreview"><span>最近抓拍</span></div>
+                <div class="cam-scanline"></div>
+              </div>
+              <div class="cam-view cam-depth">
+                <canvas class="weld-depth-canvas" id="depthCanvas"></canvas>
+                <div class="cam-label"><span class="live-dot"></span>DEPTH MAP</div>
+              </div>
             </div>
-            <div class="cam-view cam-depth">
-              <canvas class="weld-depth-canvas" id="depthCanvas"></canvas>
-              <div class="cam-label"><span class="live-dot"></span>DEPTH MAP</div>
+
+            <!-- 交互控制台（第一批：可操作仿真控制台） -->
+            <div class="ctrl-dock" id="ctrlDock">
+              <div class="ctrl-status-row">
+                <span class="ctrl-state" id="ctrlState">模型未加载 · 传送带停止</span>
+                <span class="batch-badge" id="batchBadge">无待检批次</span>
+              </div>
+              <div class="ctrl-grid">
+                <button class="ctrl-btn" id="btnBelt" title="启动/停止工件流动">▶ 启动传送带</button>
+                <button class="ctrl-btn" id="btnPhoto" title="抓取当前一帧彩色图">📷 拍照</button>
+                <button class="ctrl-btn" id="btnView" title="切换彩色/深度主视图">◧ 切到深度图</button>
+                <button class="ctrl-btn" id="btnBatch10" title="连续抓取 10 件工件">⏩ 连续采集×10</button>
+                <button class="ctrl-btn" id="btnLoadModel" title="加载 YOLOv8 检测模型">⬇ 加载模型</button>
+                <button class="ctrl-btn" id="btnDetect" title="检测当前驻留工件" disabled>◎ 检测当前帧</button>
+                <button class="ctrl-btn" id="btnBatchDetect" title="对待检批次逐张检测" disabled>▦ 批量检测</button>
+                <button class="ctrl-btn ctrl-btn-accent" id="btnLog" title="打开缺陷日志抽屉">📋 缺陷日志</button>
+                <button class="ctrl-btn ctrl-btn-lab" id="btnLab" title="实验与执行中心：调参/阈值/饼图/码垛/气缸/报警" style="grid-column:1 / -1">⚙ 实验与执行中心</button>
+                <button class="ctrl-btn ctrl-btn-mm" id="btnMultiModal" title="多模态智能中心：语音查询/跨模态检索/四模态联动/DIY布局/双屏联动">🧠 多模态<span class="mm-new">NEW</span></button>
+                <button class="ctrl-btn ctrl-btn-layout" id="btnLayoutMode" title="DIY 布局：拖拽面板交换位置，调整尺寸">✥ 布局编辑</button>
+              </div>
+              <div class="ctrl-progress" id="ctrlProgress"></div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- ⑥ 良品率监控区 -->
-      <div class="panel" style="flex:1">
-        <div class="panel-title">
-          <span><span class="icon">📈</span>良品率监控区</span>
-          <span class="tag" style="color:var(--green2);border-color:rgba(34,197,94,0.3);background:rgba(34,197,94,0.08)">实时动态</span>
-        </div>
-        <div class="panel-body">
-          <div class="yield-container">
-            <div class="yield-top">
-              <div class="yield-value" id="yieldValue">96.3</div>
-              <div class="yield-unit">%</div>
-              <div class="yield-delta" id="yieldDelta">↑ 0.2%</div>
-            </div>
-            <div class="yield-stats">今日累计良品 <span style="color:var(--text)" id="okCount">1,247</span> / 总检 <span style="color:var(--text)" id="totalCount">1,336</span></div>
-            <div class="yield-chart">
-              <canvas class="weld-rgb-canvas" id="yieldCanvas"></canvas>
-            </div>
+        <!-- ② 缺陷识别区 -->
+        <div class="panel p-detect">
+          <div class="panel-title">
+            <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="11" y1="8" x2="11" y2="14"/></svg></span>缺陷识别区</span>
+            <span class="tag">YOLO · 三类缺陷</span>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ===== 中栏 ===== -->
-    <div class="col-center">
-      <!-- ② 缺陷识别区 -->
-      <div class="panel" style="flex:1.2">
-        <div class="panel-title">
-          <span><span class="icon">🔍</span>缺陷识别区</span>
-          <span class="tag">YOLO · 三类缺陷</span>
-        </div>
-        <div class="panel-body">
-          <div class="defect-body">
-            <!-- 检测画面 -->
-            <div class="defect-detect-view">
-              <canvas class="defect-detect-canvas" id="detectCanvas"></canvas>
-              <div class="cam-label"><span class="live-dot"></span>YOLO DETECTION</div>
-            </div>
-            <!-- 右侧计数 -->
-            <div class="defect-log">
-              <div class="defect-cards">
-                <div class="defect-card burn">
-                  <div>
-                    <div class="name">🔴 焊穿</div>
-                    <div class="trend">较昨日 ↑ 3</div>
-                  </div>
-                  <div class="count" id="cntBurn">37</div>
-                </div>
-                <div class="defect-card lack">
-                  <div>
-                    <div class="name">🟡 未焊透</div>
-                    <div class="trend">较昨日 ↓ 5</div>
-                  </div>
-                  <div class="count" id="cntLack">29</div>
-                </div>
-                <div class="defect-card bite">
-                  <div>
-                    <div class="name">🔵 咬边</div>
-                    <div class="trend">较昨日 ↑ 1</div>
-                  </div>
-                  <div class="count" id="cntBite">23</div>
-                </div>
+          <div class="panel-body">
+            <div class="defect-body">
+              <div class="defect-detect-view">
+                <canvas class="defect-detect-canvas" id="detectCanvas"></canvas>
+                <div class="cam-label"><span class="live-dot"></span>YOLO DETECTION</div>
               </div>
-              <div class="defect-chart">
-                <div class="bar-group">
-                  <div class="bar burn" id="barBurn" style="height:0">
-                    <span class="bar-num">37</span>
+              <div class="defect-log">
+                <div class="defect-cards">
+                  <div class="defect-card burn">
+                    <div class="card-info">
+                      <div class="name">🔴 焊穿</div>
+                      <div class="trend">较昨日 ↑ 3</div>
+                    </div>
+                    <div class="count" id="cntBurn">37</div>
+                    <div class="ratio-track"><span class="ratio-fill" id="ratioBurn"></span></div>
                   </div>
-                  <div class="bar-label">焊穿</div>
-                </div>
-                <div class="bar-group">
-                  <div class="bar lack" id="barLack" style="height:0">
-                    <span class="bar-num">29</span>
+                  <div class="defect-card lack">
+                    <div class="card-info">
+                      <div class="name">🟡 未焊透</div>
+                      <div class="trend">较昨日 ↓ 5</div>
+                    </div>
+                    <div class="count" id="cntLack">29</div>
+                    <div class="ratio-track"><span class="ratio-fill" id="ratioLack"></span></div>
                   </div>
-                  <div class="bar-label">未焊透</div>
-                </div>
-                <div class="bar-group">
-                  <div class="bar bite" id="barBite" style="height:0">
-                    <span class="bar-num">23</span>
+                  <div class="defect-card bite">
+                    <div class="card-info">
+                      <div class="name">🔵 咬边</div>
+                      <div class="trend">较昨日 ↑ 1</div>
+                    </div>
+                    <div class="count" id="cntBite">23</div>
+                    <div class="ratio-track"><span class="ratio-fill" id="ratioBite"></span></div>
                   </div>
-                  <div class="bar-label">咬边</div>
                 </div>
-              </div>
-              <div class="defect-log-list" id="defectLog">
-                <div class="defect-log-item"><span class="ts">14:46:31</span><span class="id">#W1342</span><span class="type" style="color:var(--red2)">焊穿</span><span>conf 0.96</span></div>
-                <div class="defect-log-item"><span class="ts">14:46:25</span><span class="id">#W1341</span><span class="type" style="color:var(--accent)">咬边</span><span>conf 0.92</span></div>
-                <div class="defect-log-item"><span class="ts">14:46:18</span><span class="id">#W1340</span><span class="type" style="color:var(--orange)">未焊透</span><span>conf 0.94</span></div>
-                <div class="defect-log-item"><span class="ts">14:46:12</span><span class="id">#W1339</span><span class="type" style="color:var(--green2)">合格</span><span>conf 0.98</span></div>
-                <div class="defect-log-item"><span class="ts">14:46:05</span><span class="id">#W1338</span><span class="type" style="color:var(--green2)">合格</span><span>conf 0.97</span></div>
+                <div class="defect-log-list" id="defectLog"></div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- ③ 质量指标区 -->
-      <div class="panel" style="flex:1">
-        <div class="panel-title">
-          <span><span class="icon">🎯</span>质量指标区</span>
-          <span class="tag">准确率迭代 · 人机对比</span>
-        </div>
-        <div class="panel-body">
-          <div class="quality-body">
-            <div class="quality-chart-wrap">
-              <canvas class="accuracy-chart" id="accCanvas"></canvas>
-            </div>
-            <div class="quality-compare">
-              <div class="compare-card ai">
-                <div class="compare-label">AI 检测准确率</div>
-                <div class="compare-value">94%</div>
-                <div class="compare-sub">+7% ↑ 优于人工</div>
-              </div>
-              <div class="compare-card human">
-                <div class="compare-label">人工目检准确率</div>
-                <div class="compare-value">87%</div>
-                <div class="compare-sub">基准</div>
-              </div>
-              <div class="compare-card" style="border-color:rgba(56,189,248,0.2)">
-                <div class="compare-label">迭代轮次</div>
-                <div class="compare-value" style="color:var(--accent);font-size:28px">40+</div>
-                <div class="compare-sub" style="color:var(--muted)">82% → 94%</div>
-              </div>
-            </div>
+        <!-- ③ 分拣执行区（机械臂联动剔除 · 改进4） -->
+        <div class="panel p-sort">
+          <div class="panel-title">
+            <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="17" width="7" height="5" rx="1"/><path d="M6.5 17v-4l4.5-4 2.5 2.5-4.5 4"/><path d="M11 9l4-4M14 5l2 2M13.5 11.5l2 2"/><circle cx="16" cy="5" r="1"/><path d="M18 3l3-1"/></svg></span>分拣执行区</span>
+            <span class="tag" id="armStatus">待机</span>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ===== 右栏 ===== -->
-    <div class="col-right">
-      <!-- ④ 设备状态区 -->
-      <div class="panel">
-        <div class="panel-title">
-          <span><span class="icon">⚙️</span>设备状态区</span>
-          <span class="tag">S7-1200 · 机械臂</span>
-        </div>
-        <div class="panel-body" style="padding:10px">
-          <div class="equip-body">
-            <!-- PLC -->
-            <div class="equip-card">
-              <div class="equip-head">
-                <div class="equip-name"><span class="gear-spin">⚙</span> 西门子 S7-1200 PLC</div>
-                <div class="status-badge run"><div class="status-light run"></div>运行</div>
+          <div class="panel-body" style="padding:10px">
+            <div class="arm-body">
+              <!-- 联动状态徽标 -->
+              <div class="arm-workpiece-badge" id="armWorkpieceBadge">
+                <span class="badge-pulse"></span>
+                <span class="badge-label">处理中</span>
+                <span class="badge-wp" id="armWorkpiece">--</span>
+                <span class="badge-type" id="armDefectType">--</span>
               </div>
-              <div class="equip-row"><span>扫描周期</span><span class="val">12 ms</span></div>
-              <div class="equip-row"><span>通信状态</span><span class="val" style="color:var(--green2)">正常</span></div>
-              <div class="equip-row"><span>上线时长</span><span class="val" id="plcUptime">4h 23min</span></div>
-            </div>
-            <!-- 机械臂 -->
-            <div class="equip-card">
-              <div class="equip-head">
-                <div class="equip-name"><span class="gear-spin">🤖</span> 六轴机械臂</div>
-                <div class="status-badge run"><div class="status-light run"></div>运行</div>
+              <!-- 四阶段流水线 -->
+              <div class="arm-stages">
+                <div class="arm-stage active" data-stage="detect"><span class="stage-num">1</span><span>缺陷触发</span></div>
+                <div class="arm-stage" data-stage="move"><span class="stage-num">2</span><span>机械臂定位</span></div>
+                <div class="arm-stage" data-stage="grab"><span class="stage-num">3</span><span>抓取剔除</span></div>
+                <div class="arm-stage" data-stage="drop"><span class="stage-num">4</span><span>废品区</span></div>
               </div>
-              <div class="equip-row"><span>当前位姿</span><span class="val">码垛位 #3</span></div>
-              <div class="equip-row"><span>关节角度</span><span class="val" id="jointAngles">J1:42° J2:78° J3:125°</span></div>
-              <div class="equip-row"><span>轨迹模式</span><span class="val">门式轨迹码垛</span></div>
-            </div>
-            <!-- IOT2050 -->
-            <div class="equip-card">
-              <div class="equip-head">
-                <div class="equip-name"><span class="gear-spin">🌐</span> IOT2050 边缘网关</div>
-                <div class="status-badge run"><div class="status-light run"></div>运行</div>
-              </div>
-              <div class="equip-row"><span>数据吞吐</span><span class="val">2.4 MB/s</span></div>
-              <div class="equip-row"><span>云端连接</span><span class="val" style="color:var(--green2)">已连接</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ⑤ 分拣执行区 -->
-      <div class="panel" style="flex:1">
-        <div class="panel-title">
-          <span><span class="icon">📦</span>分拣执行区</span>
-          <span class="tag">码垛 / 剔除</span>
-        </div>
-        <div class="panel-body" style="padding:10px">
-          <div class="sort-body">
-            <!-- 合格品 -->
-            <div class="sort-card ok">
-              <div class="sort-card-head">✅ 合格品 → 码垛</div>
-              <div class="sort-info">
-                <div>执行: 六轴机械臂 · 门式轨迹</div>
-                <div style="display:flex;gap:12px;align-items:baseline">
-                  <span>今日码垛</span>
-                  <span class="num" id="sortOkCount">1,247</span>
-                  <span style="font-size:11px;color:var(--muted)">件</span>
-                </div>
-                <div>码垛位: #3 / #6</div>
-              </div>
-              <div class="sort-anim">
-                <svg viewBox="0 0 200 50" style="width:100%;height:100%">
-                  <path d="M10,40 Q100,5 190,40" fill="none" stroke="rgba(34,197,94,0.2)" stroke-width="1.5" stroke-dasharray="4,3"/>
-                  <circle cx="10" cy="40" r="5" fill="#22c55e" id="armCircle">
-                    <animateMotion dur="3s" repeatCount="indefinite" path="M0,0 Q90,-35 180,0"/>
-                  </circle>
-                  <rect x="5" y="42" width="10" height="6" fill="rgba(34,197,94,0.3)" rx="1"/>
-                  <rect x="185" y="42" width="10" height="6" fill="rgba(34,197,94,0.3)" rx="1"/>
+              <!-- 机械臂运动可视化 -->
+              <div class="arm-stage-view">
+                <svg viewBox="0 0 200 70" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%">
+                  <!-- 传送带 -->
+                  <line x1="6" y1="44" x2="194" y2="44" stroke="rgba(148,163,184,0.25)" stroke-width="1"/>
+                  <rect x="6" y="44" width="188" height="2" fill="rgba(56,189,248,0.15)"/>
+                  <!-- 废品区 -->
+                  <rect x="158" y="50" width="36" height="16" rx="2" fill="rgba(239,68,68,0.1)" stroke="rgba(239,68,68,0.4)" stroke-width="1"/>
+                  <text x="176" y="61" fill="rgba(248,113,113,0.7)" font-size="8" text-anchor="middle">废品区</text>
+                  <!-- 工件（随检测事件移动） -->
+                  <g id="armCar" transform="translate(8,0)">
+                    <rect x="0" y="30" width="16" height="14" rx="2" fill="#ef4444" opacity="0.85"/>
+                    <line x1="2" y1="37" x2="14" y2="37" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>
+                  </g>
+                  <!-- 气缸剔除机构（演示用，默认隐藏） -->
+                  <g id="cylinderStage" style="opacity:0;transition:opacity .2s">
+                    <rect x="150" y="20" width="40" height="9" rx="2" fill="rgba(251,146,60,0.25)" stroke="rgba(251,146,60,0.6)" stroke-width="1"/>
+                    <rect class="cyl-rod" x="188" y="22" width="2" height="5" fill="#fb923c"/>
+                    <text x="170" y="17" fill="rgba(251,146,60,0.75)" font-size="7.5" text-anchor="middle">气缸剔除</text>
+                  </g>
+                  <!-- 机械臂基座 -->
+                  <rect x="88" y="8" width="24" height="8" rx="2" fill="rgba(56,189,248,0.35)"/>
+                  <line x1="100" y1="16" x2="100" y2="28" stroke="rgba(56,189,248,0.5)" stroke-width="2"/>
+                  <circle cx="100" cy="16" r="3" fill="#38bdf8"/>
                 </svg>
               </div>
-            </div>
-            <!-- 不合格品 -->
-            <div class="sort-card ng">
-              <div class="sort-card-head">❌ 不合格品 → 剔除</div>
-              <div class="sort-info">
-                <div>执行: 气缸 · 推杆剔除</div>
-                <div style="display:flex;gap:12px;align-items:baseline">
-                  <span>今日剔除</span>
-                  <span class="num" id="sortNgCount">89</span>
-                  <span style="font-size:11px;color:var(--muted)">件</span>
-                </div>
-                <div>剔除速率: 12 件/h</div>
-              </div>
-              <div class="sort-anim">
-                <svg viewBox="0 0 200 40" style="width:100%;height:100%">
-                  <rect x="10" y="15" width="15" height="15" fill="rgba(239,68,68,0.3)" rx="2" id="rejectBox"/>
-                  <rect x="30" y="18" width="25" height="8" fill="#ef4444" rx="1" id="piston">
-                    <animate attributeName="x" values="30;130;130;30;30" dur="2s" repeatCount="indefinite" keyTimes="0;0.3;0.5;0.8;1"/>
-                  </rect>
-                  <line x1="150" y1="5" x2="150" y2="35" stroke="rgba(239,68,68,0.2)" stroke-width="1" stroke-dasharray="3,2"/>
-                  <text x="155" y="22" fill="rgba(248,113,113,0.5)" font-size="8">剔除区</text>
-                </svg>
+              <div class="arm-note">检测结果实时驱动机械臂：缺陷触发后自动运动至工件位置完成剔除</div>
+              <div class="arm-counters">
+                <div class="arm-counter ok">✅ 码垛 <span id="sortOkCount">1,247</span> 件</div>
+                <div class="arm-counter ng">❌ 剔除 <span id="sortNgCount">89</span> 件</div>
               </div>
             </div>
           </div>
         </div>
+
+        <!-- ④ 良品率监控区（改进1：工件可追溯） -->
+        <div class="panel p-yield">
+          <div class="panel-title">
+            <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><polyline points="7 15 11 10 14 13 20 6"/><circle cx="20" cy="6" r="1.5"/></svg></span>良品率监控区</span>
+            <span class="tag" style="color:var(--green2);border-color:rgba(34,197,94,0.3);background:rgba(34,197,94,0.08)">实时 · 可追溯</span>
+          </div>
+          <div class="panel-body">
+            <div class="yield-container">
+              <div class="yield-top">
+                <div class="yield-value" id="yieldValue">96.3</div>
+                <div class="yield-unit">%</div>
+                <div class="yield-delta" id="yieldDelta">↑ 0.2%</div>
+              </div>
+              <div class="yield-stats">今日累计良品 <span style="color:var(--text)" id="okCount">1,247</span> / 总检 <span style="color:var(--text)" id="totalCount">1,336</span></div>
+              <div class="yield-chart">
+                <canvas class="weld-rgb-canvas" id="yieldCanvas"></canvas>
+              </div>
+              <div class="yield-trace" id="yieldTrace"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ⑤ 设备状态区 -->
+        <div class="panel p-equip">
+          <div class="panel-title">
+            <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>设备状态区</span>
+            <span class="tag">S7-1200 · 机械臂</span>
+          </div>
+          <div class="panel-body" style="padding:10px">
+            <div class="equip-body">
+              <div class="equip-card">
+                <div class="equip-head">
+                  <div class="equip-name"><span class="gear-spin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> 西门子 S7-1200 PLC</div>
+                  <div class="status-badge run"><div class="status-light run"></div>运行</div>
+                </div>
+                <div class="equip-row"><span>扫描周期</span><span class="val">12 ms</span></div>
+                <div class="equip-row"><span>通信状态</span><span class="val" style="color:var(--green2)">正常</span></div>
+                <div class="equip-row"><span>上线时长</span><span class="val" id="plcUptime">4h 23min</span></div>
+              </div>
+              <div class="equip-card">
+                <div class="equip-head">
+                  <div class="equip-name"><span class="gear-spin robot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M9 4h6"/><circle cx="9" cy="14" r="1.3"/><circle cx="15" cy="14" r="1.3"/><path d="M9 17h6"/></svg></span> 六轴机械臂</div>
+                  <div class="status-badge run"><div class="status-light run"></div>运行</div>
+                </div>
+                <div class="equip-row"><span>当前位姿</span><span class="val">码垛位 #3</span></div>
+                <div class="equip-row"><span>关节角度</span><span class="val" id="jointAngles">J1:42° J2:78° J3:125°</span></div>
+                <div class="equip-row"><span>轨迹模式</span><span class="val">门式轨迹码垛</span></div>
+              </div>
+              <div class="equip-card">
+                <div class="equip-head">
+                  <div class="equip-name"><span class="gear-spin globe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg></span> IOT2050 边缘网关</div>
+                  <div class="status-badge run"><div class="status-light run"></div>运行</div>
+                </div>
+                <div class="equip-row"><span>数据吞吐</span><span class="val">2.4 MB/s</span></div>
+                <div class="equip-row"><span>云端连接</span><span class="val" style="color:var(--green2)">已连接</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
+
+    <!-- ============== 第二带：分析端 ============== -->
+    <div class="band">
+      <div class="band-label">
+        <span class="band-id analyze">02</span>
+        <span class="band-name">分析端</span>
+        <span class="band-flow">样本沉淀 → 缺陷分布 → 成因诊断 → 工艺参数 → 优化反馈</span>
+        <span class="band-line"></span>
+      </div>
+      <div class="band-grid">
+
+        <!-- ⑥ 质量指标区 -->
+        <div class="panel p-quality">
+          <div class="panel-title">
+            <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></span>质量指标区</span>
+            <span class="tag">准确率迭代 · 人机对比</span>
+          </div>
+          <div class="panel-body">
+            <div class="quality-body">
+              <div class="quality-chart-wrap">
+                <canvas class="accuracy-chart" id="accCanvas"></canvas>
+              </div>
+              <div class="quality-compare">
+                <div class="compare-card ai">
+                  <div class="compare-label">AI 检测准确率</div>
+                  <div class="compare-value">94%</div>
+                  <div class="compare-sub">+7% ↑ 优于人工</div>
+                </div>
+                <div class="compare-card human">
+                  <div class="compare-label">人工目检准确率</div>
+                  <div class="compare-value">87%</div>
+                  <div class="compare-sub">基准</div>
+                </div>
+                <div class="compare-card" style="border-color:rgba(56,189,248,0.2)">
+                  <div class="compare-label">迭代轮次</div>
+                  <div class="compare-value" style="color:var(--accent);font-size:22px">40+</div>
+                  <div class="compare-sub" style="color:var(--muted)">82% → 94%</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ⑦ 缺陷样本库（改进3） -->
+        <div class="panel p-sample">
+          <div class="panel-title">
+            <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6l2 3h8a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><line x1="3" y1="11" x2="21" y2="11"/></svg></span>缺陷样本库</span>
+            <span class="tag">自动拍照存档</span>
+          </div>
+          <div class="panel-body">
+            <div class="sample-body">
+              <div class="sample-summary">
+                <div class="sample-total" id="sampleTotal">1,284</div>
+                <div class="sample-summary-label">累计缺陷样本<br><span>持续扩充训练集</span></div>
+                <div class="sample-live"><span class="live-dot"></span> 自动采集</div>
+              </div>
+              <div class="sample-grid" id="sampleGrid"></div>
+              <div class="sample-note">每次检测命中 → 自动截取缺陷帧 → 存入样本库（工件号 / 类型 / 置信度 / 时间）</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ⑧ 缺陷分布图（改进2） -->
+        <div class="panel p-dist">
+          <div class="panel-title">
+            <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg></span>缺陷分布趋势</span>
+            <span class="tag">工件序列 × 缺陷类型</span>
+          </div>
+          <div class="panel-body">
+            <div class="dist-wrap">
+              <canvas id="distCanvas"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- ⑨ 缺陷诊断 + 优化建议（改进5 · 堆叠） -->
+        <div class="panel stack p-diagnosis">
+          <div class="sub-panel">
+            <div class="panel-title">
+              <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7a6 6 0 0 0 12 0V3"/><path d="M6 6H3v3a4 4 0 0 0 4 4M18 6h3v3a4 4 0 0 1-4 4"/><line x1="12" y1="16" x2="12" y2="20"/><circle cx="12" cy="21" r="1.5"/></svg></span>缺陷诊断</span>
+              <span class="tag">成因定位</span>
+            </div>
+            <div class="panel-body" style="padding:8px">
+              <div class="diagnosis-cards" id="diagnosisCards"></div>
+            </div>
+          </div>
+          <div class="sub-panel" id="advicePanel">
+            <div class="panel-title">
+              <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2.3h6c0-1.1.4-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg></span>优化建议</span>
+              <span class="tag" id="adviceWorkpiece">--</span>
+            </div>
+            <div class="panel-body" style="padding:8px">
+              <div class="advice-cause-row"><span class="advice-k">检测到成因</span><span class="advice-v" id="adviceCause">等待缺陷事件…</span></div>
+              <div class="advice-main" id="adviceText">缺陷出现后将给出工艺参数调整建议</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ⑩ 工艺参数监控区（改进5） -->
+        <div class="panel p-param">
+          <div class="panel-title">
+            <span><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span>工艺参数监控</span>
+            <span class="tag">实时 · 异常标注</span>
+          </div>
+          <div class="panel-body">
+            <div class="param-body">
+              <div class="param-row" id="paramWrap-current">
+                <div class="param-head"><span class="param-label">焊接电流</span><span class="param-value"><b id="param-current">185.0</b> A</span></div>
+                <div class="param-track"><div class="param-bar" id="paramBar-current"></div><div class="param-warn"></div></div>
+              </div>
+              <div class="param-row" id="paramWrap-voltage">
+                <div class="param-head"><span class="param-label">电弧电压</span><span class="param-value"><b id="param-voltage">22.0</b> V</span></div>
+                <div class="param-track"><div class="param-bar" id="paramBar-voltage"></div><div class="param-warn"></div></div>
+              </div>
+              <div class="param-row" id="paramWrap-speed">
+                <div class="param-head"><span class="param-label">焊接速度</span><span class="param-value"><b id="param-speed">8.5</b> mm/s</span></div>
+                <div class="param-track"><div class="param-bar" id="paramBar-speed"></div><div class="param-warn"></div></div>
+              </div>
+              <div class="param-anomaly-note" id="paramAnomalyNote"></div>
+              <div class="param-hint">缺陷出现时，关联参数自动标记异常点并对接优化建议</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
   </div>
 
   <!-- ====== 底部质量底线栏 ====== -->
   <div class="footer">
     <div class="footer-item">
-      <span style="font-size:16px">⚠</span>
+      <span class="footer-warn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
       <span class="label">0.1 毫米是底线</span>
     </div>
     <span class="footer-divider">|</span>
@@ -304,6 +407,281 @@
   </div>
 </div>
 
+<!-- ====== 缺陷日志抽屉（右侧滑出） ====== -->
+<div class="drawer-mask" id="drawerMask"></div>
+<aside class="log-drawer" id="logDrawer">
+  <div class="drawer-head">
+    <div class="drawer-title">缺陷日志 <span class="drawer-count" id="drawerCount">0 条</span></div>
+    <button class="drawer-close" id="drawerClose" title="关闭">×</button>
+  </div>
+  <div class="drawer-filters">
+    <input class="log-search" id="logSearch" placeholder="搜索工件编号 / 缺陷类型…">
+    <div class="log-filter-tabs" id="logFilterTabs">
+      <button class="active" data-filter="all">全部</button>
+      <button data-filter="burn">焊穿</button>
+      <button data-filter="lack">未焊透</button>
+      <button data-filter="bite">咬边</button>
+    </div>
+  </div>
+  <div class="drawer-list" id="drawerList"></div>
+  <div class="drawer-foot" id="drawerFoot">共 0 条记录</div>
+</aside>
+
+<!-- ====== 设备报警条（顶部，报警态显示） ====== -->
+<div class="alarm-bar" id="alarmBar">
+  <span class="alarm-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
+  <span class="alarm-text">设备报警：<b id="alarmReason">连续缺陷检出，超出工艺容忍</b></span>
+  <button class="alarm-confirm" id="btnConfirmAlarm">确认并复位</button>
+</div>
+
+<!-- ====== 第二批：实验与执行中心 ====== -->
+<div class="b2-modal-mask" id="b2ModalMask"></div>
+
+<!-- 主实验中心 -->
+<div class="b2-modal b2-lab" id="labModal">
+  <div class="b2-modal-head">
+    <div class="b2-modal-title">实验与执行中心 <span>调参 · 阈值 · 呈现 · 执行 · 报警</span></div>
+    <button class="b2-modal-close" title="关闭">×</button>
+  </div>
+  <div class="b2-modal-body">
+    <!-- 相机调参 -->
+    <section class="b2-sec">
+      <div class="b2-sec-title"><span class="b2-sec-icon">◉</span>相机采集调参 <small>9</small></div>
+      <div class="b2-slider-row">
+        <label>曝光 <b id="valExposure">1.00</b></label>
+        <input type="range" id="sldExposure" min="0.4" max="1.8" step="0.05" value="1">
+      </div>
+      <div class="b2-slider-row">
+        <label>增益 <b id="valGain">1.00</b></label>
+        <input type="range" id="sldGain" min="0.5" max="2" step="0.05" value="1">
+      </div>
+      <button class="b2-mini-btn" id="btnCameraReset">复位默认参数</button>
+    </section>
+
+    <!-- 置信度阈值实验 -->
+    <section class="b2-sec">
+      <div class="b2-sec-title"><span class="b2-sec-icon">◎</span>置信度阈值实验 <small>14</small></div>
+      <div class="b2-slider-row">
+        <label>阈值 <b id="valThreshold">0.50</b></label>
+        <input type="range" id="sldThreshold" min="0.3" max="0.9" step="0.01" value="0.5">
+      </div>
+      <div class="threshold-canvas-wrap"><canvas id="thresholdCanvas"></canvas></div>
+      <div class="th-stats">
+        <div><span>检出</span><b id="thDetected" style="color:var(--red2)">16</b></div>
+        <div><span>漏检</span><b id="thMissed" style="color:var(--muted)">4</b></div>
+        <div><span>召回率</span><b id="thRecall" style="color:var(--accent)">80%</b></div>
+      </div>
+      <div class="th-hint" id="thHint">阈值适中：兼顾检出与误报（推荐）</div>
+    </section>
+
+    <!-- 结果呈现 -->
+    <section class="b2-sec">
+      <div class="b2-sec-title"><span class="b2-sec-icon">▤</span>结果呈现 <small>15·16·17</small></div>
+      <div class="b2-btn-grid">
+        <button class="b2-btn" id="btnPieRefresh">◕ 缺陷占比饼图</button>
+        <button class="b2-btn" id="btnShowAcc">📈 准确率曲线</button>
+        <button class="b2-btn" id="btnShowCompare">⚖ 人机对比</button>
+        <button class="b2-btn" id="btnShowPlc">🔌 PLC 状态</button>
+      </div>
+    </section>
+
+    <!-- 监控与执行 -->
+    <section class="b2-sec">
+      <div class="b2-sec-title"><span class="b2-sec-icon">⚙</span>监控与执行 <small>18·20·21</small></div>
+      <div class="b2-btn-grid">
+        <button class="b2-btn is-on" id="btnMonitor">⏸ 暂停良品率监控</button>
+        <button class="b2-btn" id="btnStack">🦾 机械臂码垛</button>
+        <button class="b2-btn" id="btnCylinder">💨 气缸剔除演示</button>
+      </div>
+    </section>
+
+    <!-- 报警处置 -->
+    <section class="b2-sec b2-sec-danger">
+      <div class="b2-sec-title"><span class="b2-sec-icon">⚠</span>设备报警处置 <small>22</small></div>
+      <div class="b2-btn-grid">
+        <button class="b2-btn danger" id="btnRaiseAlarm">🚨 模拟设备报警</button>
+        <button class="b2-btn" id="btnClearAlarm">✓ 报警复位</button>
+      </div>
+      <div class="b2-sec-note">连续检出 3 件缺陷时系统将自动报警，需人工确认复位。</div>
+    </section>
+  </div>
+</div>
+
+<!-- 饼图浮层 -->
+<div class="b2-modal b2-view" id="pieModal">
+  <div class="b2-modal-head"><div class="b2-modal-title">缺陷类型占比</div><button class="b2-modal-close">×</button></div>
+  <div class="b2-modal-body pie-body">
+    <div class="pie-canvas-wrap"><canvas id="pieCanvas"></canvas></div>
+    <div class="pie-legend" id="pieLegend"></div>
+  </div>
+</div>
+
+<!-- 准确率曲线浮层 -->
+<div class="b2-modal b2-view" id="accModal">
+  <div class="b2-modal-head"><div class="b2-modal-title">准确率迭代曲线 <span>82% → 94%，40 轮迭代</span></div><button class="b2-modal-close">×</button></div>
+  <div class="b2-modal-body acc-body">
+    <canvas id="accBigCanvas"></canvas>
+    <div class="acc-note">AI 检测准确率随迭代轮次稳步提升，现已稳定超过人工目检基准（87%）。</div>
+  </div>
+</div>
+
+<!-- 人机对比浮层 -->
+<div class="b2-modal b2-view" id="compareModal">
+  <div class="b2-modal-head"><div class="b2-modal-title">人机对比 <span>AI vs 人工目检</span></div><button class="b2-modal-close">×</button></div>
+  <div class="b2-modal-body" id="comparePanelBody"></div>
+</div>
+
+<!-- PLC 状态浮层 -->
+<div class="b2-modal b2-view" id="plcModal">
+  <div class="b2-modal-head"><div class="b2-modal-title">PLC 状态面板 <span>S7-1200 · 实时诊断</span></div><button class="b2-modal-close">×</button></div>
+  <div class="b2-modal-body" id="plcPanelBody"></div>
+</div>
+
+<!-- ====== 第三批：多模态智能中心 ====== -->
+<div class="mm-mask" id="mmModalMask"></div>
+<div class="mm-modal" id="mmModal">
+  <div class="mm-head">
+    <div class="mm-head-title">
+      <span class="mm-logo">🧠</span>
+      <div>多模态智能中心 <span>语音 · 文本 · 图像 · 数据 · 布局 · 双屏</span></div>
+    </div>
+    <button class="mm-close" id="mmClose" title="关闭">×</button>
+  </div>
+  <!-- Tab 导航 -->
+  <div class="mm-tabs">
+    <button class="mm-tab active" data-tab="voice">🎤 语音查询</button>
+    <button class="mm-tab" data-tab="text">🔍 跨模态检索</button>
+    <button class="mm-tab" data-tab="image">🖼 四模态联动</button>
+    <button class="mm-tab" data-tab="layout">✥ DIY 布局</button>
+    <button class="mm-tab" data-tab="sync">🖥 双屏联动</button>
+  </div>
+
+  <div class="mm-body">
+    <!-- ===== 语音查询 ===== -->
+    <div class="mm-pane active" data-pane="voice">
+      <div class="mm-voice-hero">
+        <button class="mm-mic" id="btnVoice"><span class="mm-mic-icon">🎤</span><span class="mm-mic-label">开始说话</span></button>
+        <div class="mm-voice-side">
+          <div class="mm-voice-title">说出你想查询的内容</div>
+          <div class="mm-voice-status" id="voiceStatus">点击麦克风开始语音查询，例如「查一下焊穿缺陷」</div>
+          <button class="mm-textlink" id="btnVoiceExample">没有麦克风？点此模拟一次语音查询 →</button>
+          <div class="mm-voice-examples">
+            <span>试试：</span>
+            <em>查一下焊穿缺陷</em><em>查找最近的不焊透记录</em><em>看今天的缺陷统计</em>
+          </div>
+        </div>
+      </div>
+      <div class="mm-hint-box">
+        <b>说明</b>：本功能为演示级模拟。支持 Web Speech API 的浏览器将真实识别你的语音；在无麦克风权限或不支持的环境下，自动降级为预设语句模拟，识别结果会送入「跨模态检索」并联动出图像与日志。
+      </div>
+    </div>
+
+    <!-- ===== 跨模态检索 ===== -->
+    <div class="mm-pane" data-pane="text">
+      <div class="mm-search-bar">
+        <input id="mmSearchInput" placeholder="输入缺陷类型 / 工件编号 / 时间，如 焊穿、W1338、14:45…">
+        <button id="btnMmSearch">🔍 检索</button>
+      </div>
+      <div class="mm-quick-row">
+        <span>快捷检索：</span>
+        <button id="mmQuick0">焊穿</button><button id="mmQuick1">未焊透</button><button id="mmQuick2">咬边</button>
+      </div>
+      <div class="mm-search-hint" id="mmSearchHint">当前共 0 条缺陷记录（输入关键词检索）</div>
+      <div class="mm-result-list" id="mmResultList"></div>
+    </div>
+
+    <!-- ===== 四模态联动 ===== -->
+    <div class="mm-pane" data-pane="image">
+      <div class="mm-fuse-layout">
+        <div class="mm-fuse-left">
+          <div class="mm-sub-title">① 图像模态 · 点选一张缺陷照片</div>
+          <div class="mm-image-wall" id="mmImageWall"></div>
+        </div>
+        <div class="mm-fuse-right">
+          <div class="mm-sub-title">② 语音 + 文本 + 数据协同展示</div>
+          <div class="mm-fuse-preview">
+            <img id="mmFuseImage" src="" alt="缺陷图像">
+            <div class="mm-fuse-imgmeta" id="mmFuseImageMeta">未选择缺陷</div>
+          </div>
+          <div class="mm-fuse-block">
+            <div class="mm-fuse-label">🎤 语音描述 <button class="mm-speak-btn" id="btnSpeak">🔊 播报</button></div>
+            <div class="mm-voice-text" id="mmVoiceText">点选左侧缺陷照片后，这里显示语音描述内容。</div>
+          </div>
+          <div class="mm-fuse-block">
+            <div class="mm-fuse-label">📝 文本记录</div>
+            <div class="mm-fuse-text" id="mmFuseText"><div class="mm-empty-mini">等待选择缺陷…</div></div>
+          </div>
+          <div class="mm-fuse-block">
+            <div class="mm-fuse-label">📊 检测数据 / 统计</div>
+            <div class="mm-fuse-data" id="mmFuseData"><div class="mm-empty-mini">等待选择缺陷…</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== DIY 布局 ===== -->
+    <div class="mm-pane" data-pane="layout">
+      <div class="mm-hint-box mm-hint-accent">
+        <b>看板 DIY 布局</b>：点击下方按钮进入编辑模式后，可拖拽任意面板到另一面板上交换位置，或用面板右上角的「大 / 中 / 小」调整尺寸。布局自动保存到本机，刷新后仍然生效。
+      </div>
+      <div class="mm-layout-actions">
+        <button class="mm-action-btn primary" id="btnLayoutMode2">✥ 进入布局编辑</button>
+      </div>
+      <div class="mm-layout-preview">
+        <div class="mm-layout-diagram">
+          <span class="ld-a">采集</span><span class="ld-b">识别</span><span class="ld-c">良品率</span>
+          <span class="ld-d">分拣</span><span class="ld-e">设备</span>
+        </div>
+        <div class="mm-layout-note">检测端 5 个面板</div>
+      </div>
+    </div>
+
+    <!-- ===== 双屏联动 ===== -->
+    <div class="mm-pane" data-pane="sync">
+      <div class="mm-sync-hero">
+        <div class="mm-sync-icon">🖥</div>
+        <div>
+          <div class="mm-sync-title">双屏联动演示</div>
+          <div class="mm-sync-desc">打开一个独立的「联动大屏」窗口，主控端选中缺陷、切换视图、触发报警时，大屏实时同步展示——模拟车间「操作屏 + 大屏」的部署形态。</div>
+        </div>
+      </div>
+      <div class="mm-sync-actions">
+        <button class="mm-action-btn primary" id="btnOpenScreen">🖥 打开联动大屏</button>
+        <button class="mm-action-btn" id="btnSyncNow">🔄 立即推送当前状态</button>
+      </div>
+      <div class="sync-status" id="syncStatus"><span class="sync-dot"></span> 等待联动屏幕接入…</div>
+      <div class="mm-hint-box" id="syncUnsupported" style="display:none;color:var(--yellow)">
+        当前浏览器不支持 BroadcastChannel，双屏联动不可用。请使用较新版本的 Edge / Chrome。
+      </div>
+      <div class="mm-sync-steps">
+        <div><b>1</b> 点击「打开联动大屏」，会新开一个浏览器窗口</div>
+        <div><b>2</b> 把两个窗口并排放置（可用系统分屏）</div>
+        <div><b>3</b> 在主控端「四模态联动」点选缺陷，观察大屏同步</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 布局编辑悬浮工具条 -->
+<div class="layout-toolbar" id="layoutToolbar">
+  <span class="lt-label">✥ 布局编辑中</span>
+  <span class="lt-tip">拖拽面板交换位置 · 用面板上的 大/中/小 调整尺寸</span>
+  <button id="btnLayoutSave">💾 保存布局</button>
+  <button id="btnLayoutReset">↺ 恢复默认</button>
+  <button class="lt-exit" id="btnLayoutExit">✓ 完成</button>
+</div>
+
+<!-- 联动大屏模式标识 -->
+<div class="screen-mode-tag" id="screenModeTag">
+  <span class="smt-dot"></span> 联动大屏 · 实时接收主控数据
+</div>
+<div class="screen-sync-flash" id="screenSyncFlash"></div>
+
+<!-- ====== 状态提示 toast ====== -->
+<div class="toast-stack" id="toastStack"></div>
+
+<!-- ====== anime.js 动画库（本地，离线可用） ====== -->
+<script src="./vendor/anime.min.js"></script>
 <!-- ====== 唯一 JS 入口（ES Module） ====== -->
 <script type="module" src="./src/main.js"></script>
 

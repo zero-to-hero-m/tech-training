@@ -18,7 +18,7 @@ export function drawAccChart(canvas) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, w, h);
 
-  const pad = { top: 15, right: 20, bottom: 25, left: 35 };
+  const pad = { top: 15, right: 20, bottom: 25, left: 46 };
   const cw = w - pad.left - pad.right;
   const ch = h - pad.top - pad.bottom;
 
@@ -37,7 +37,7 @@ export function drawAccChart(canvas) {
   // 网格
   ctx.strokeStyle = 'rgba(30,41,59,0.6)';
   ctx.lineWidth = 0.5;
-  ctx.font = '15px "PingFang SC", "Microsoft YaHei", sans-serif';
+  ctx.font = '13px "PingFang SC", "Microsoft YaHei", sans-serif';
   ctx.fillStyle = COLORS.muted;
   for (let v = 75; v <= 100; v += 5) {
     const y = pad.top + ch - ((v - yMin) / (yMax - yMin)) * ch;
@@ -46,7 +46,7 @@ export function drawAccChart(canvas) {
     ctx.lineTo(pad.left + cw, y);
     ctx.stroke();
     ctx.textAlign = 'right';
-    ctx.fillText(v + '%', pad.left - 4, y + 3);
+    ctx.fillText(v + '%', pad.left - 6, y + 4);
   }
 
   // X 轴标注
@@ -67,9 +67,20 @@ export function drawAccChart(canvas) {
   ctx.lineTo(pad.left + cw, humanY);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = 'rgba(148,163,184,0.8)';
-  ctx.textAlign = 'left';
-  ctx.fillText('人工目检 87%', pad.left + 5, humanY - 5);
+  // 标注加半透明底并上移到网格顶部，避免与上升曲线交叉
+  const hText = '人工目检 87%';
+  ctx.font = '12px "PingFang SC", "Microsoft YaHei", sans-serif';
+  const hw = ctx.measureText(hText).width + 12;
+  const hx = pad.left + 4;
+  const hy = 1;
+  ctx.fillStyle = 'rgba(3,12,24,0.85)';
+  ctx.fillRect(hx, hy, hw, 17);
+  ctx.strokeStyle = 'rgba(148,163,184,0.35)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(hx, hy, hw, 17);
+  ctx.fillStyle = 'rgba(203,213,225,0.9)';
+  ctx.textAlign = 'center';
+  ctx.fillText(hText, hx + hw / 2, hy + 12);
 
   // 折线
   const step = cw / rounds;

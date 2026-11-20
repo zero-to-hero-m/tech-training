@@ -1,78 +1,96 @@
 /**
- * defect-stats.js — 缺陷统计计数 + 柱状图动画
+ * defect-stats.js — 缺陷统计计数 + 占比进度条
  *
  * 管理 #cntBurn / #cntLack / #cntBite 计数器，
- * 驱动 #barBurn / #barLack / #barBite 柱状图高度动画，
+ * 以卡片内的细进度条呈现三类缺陷各自占比（避免原柱状图遮挡卡片数字），
  * 并处理底部 log 列表滚动。
  */
 
 import { INITIAL_COUNTS } from './config.js';
-import { $ } from './utils.js';
+import { $, fmtWorkpiece } from './utils.js';
+import { on, EVT } from './event-bus.js';
 
 // ========== 模块状态 ==========
 let burnCount = INITIAL_COUNTS.burn;
 let lackCount = INITIAL_COUNTS.lack;
 let biteCount = INITIAL_COUNTS.bite;
 
-const BAR_MAX = 50;
-const BAR_BASE_H = 100; // 像素
-
 /**
- * 更新单个柱子高度
- * @param {string} barId
- * @param {number} count
+ * 更新三类缺陷的占比进度条（相对三类缺陷总数）
  */
-function updateBar(barId, count) {
-  const bar = $(barId);
-  const h = (count / BAR_MAX) * BAR_BASE_H;
-  bar.style.height = h + 'px';
+function updateRatios() {
+  const total = burnCount + lackCount + biteCount || 1;
+  const set = (id, count) => {
+    const el = $(id);
+    if (el) el.style.width = ((count / total) * 100).toFixed(1) + '%';
+  };
+  set('ratioBurn', burnCount);
+  set('ratioLack', lackCount);
+  set('ratioBite', biteCount);
 }
 
 /**
- * 初始化柱状图（带入场动画）
+ * 初始化占比进度条（带入场动画）
  */
-function initBars() {
-  setTimeout(() => {
-    updateBar('barBurn', burnCount);
-    updateBar('barLack', lackCount);
-    updateBar('barBite', biteCount);
+function initRatios() {
+  // 先清零，下一帧再撑到目标宽度，形成生长动画
+  ['ratioBurn', 'ratioLack', 'ratioBite'].forEach((id) => {
+    const el = $(id);
+    if (el) el.style.width = '0%';
+  });
+  setTimeout(updateRatios, 300);
+}
 
-    // 更新 bar-num 文本
-    $('barBurn').querySelector('.bar-num').textContent = burnCount;
-    $('barLack').querySelector('.bar-num').textContent = lackCount;
-    $('barBite').querySelector('.bar-num').textContent = biteCount;
-  }, 300);
+const TYPE_KEY = { burn: 'burn', lack: 'lack', bite: 'bite' };
+
+/**
+ * 追加一条检测日志到列表顶部
+ */
+function prependLog(payload) {
+  const list = $('defectLog');
+  if (!list) return;
+  const isDefect = !!payload.type;
+  const typeText = isDefect ? payload.cn : '合格';
+  const typeColor = isDefect ? payload.color : 'var(--green2)';
+  const item = document.createElement('div');
+  item.className = 'defect-log-item';
+  item.innerHTML = `
+    <span class="ts">${payload.time}</span>
+    <span class="id">${fmtWorkpiece(payload.workpieceId)}</span>
+    <span class="type" style="color:${typeColor}">${typeText}</span>
+    <span>conf ${payload.conf.toFixed(2)}</span>
+  `;
+  list.prepend(item);
+  while (list.children.length > 6) list.removeChild(list.lastChild);
 }
 
 /**
- * 启动缺陷计数定时增长
+ * 接收缺陷事件：计数 + 占比进度条 + 日志
  */
-function startCounter() {
-  setInterval(() => {
-    const r = Math.random();
-    if (r < 0.3) {
-      burnCount++;
-      $('cntBurn').textContent = burnCount;
-      $('barBurn').querySelector('.bar-num').textContent = burnCount;
-      updateBar('barBurn', burnCount);
-    } else if (r < 0.6) {
-      lackCount++;
-      $('cntLack').textContent = lackCount;
-      $('barLack').querySelector('.bar-num').textContent = lackCount;
-      updateBar('barLack', lackCount);
-    } else if (r < 0.8) {
-      biteCount++;
-      $('cntBite').textContent = biteCount;
-      $('barBite').querySelector('.bar-num').textContent = biteCount;
-      updateBar('barBite', biteCount);
-    }
-  }, 5000);
+function onDefect(payload) {
+  const key = TYPE_KEY[payload.type];
+  const cntEl = $(`cnt${key.charAt(0).toUpperCase() + key.slice(1)}`);
+  if (key === 'burn') burnCount++;
+  else if (key === 'lack') lackCount++;
+  else if (key === 'bite') biteCount++;
+  const count = key === 'burn' ? burnCount : key === 'lack' ? lackCount : biteCount;
+  if (cntEl) cntEl.textContent = count;
+  updateRatios();
+  prependLog(payload);
 }
 
 /**
- * 初始化缺陷统计模块
+ * 接收合格事件：仅记录日志
+ */
+function onOk(payload) {
+  prependLog(payload);
+}
+
+/**
+ * 初始化缺陷统计模块（改为事件驱动）
  */
 export function initDefectStats() {
-  initBars();
-  startCounter();
+  initRatios();
+  on(EVT.DEFECT, onDefect);
+  on(EVT.OK, onOk);
 }

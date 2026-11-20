@@ -2,38 +2,44 @@
  * main.js — 应用入口
  *
  * 聚合所有模块的初始化函数，统一启动。
- * HTML 通过 <script type="module" src="./main.js"> 加载此文件。
  *
- * 依赖链（无暗依赖，全部显式 import）：
+ * 架构（事件驱动的检测—分析双闭环）：
  *
- *   main.js
- *   ├── config.js        (常量)
- *   ├── utils.js         (工具函数)
- *   ├── scale.js         (缩放) ← config
- *   ├── clock.js         (时钟) ← utils
- *   ├── rgb-camera.js    (RGB采集) ← config, utils
- *   ├── depth-camera.js  (深度图) ← config, utils, rgb-camera
- *   ├── defect-detect.js (YOLO检测) ← config, utils
- *   ├── yield-chart.js   (良品率) ← config, utils
- *   ├── accuracy-chart.js(准确率) ← config, utils
- *   ├── defect-stats.js  (缺陷统计) ← config, utils
- *   ├── equipment.js     (设备状态) ← utils
- *   ├── sort-stats.js    (分拣统计) ← config, utils
- *   └── animation-loop.js(动画循环) ← rgb-camera, depth-camera, defect-detect, utils
+ *   defect-detect.js  ──emit DEFECT/OK──▶  event-bus.js
+ *                                            │
+ *        ┌───────────────────────────────────┼───────────────────────────┐
+ *        ▼               ▼                   ▼              ▼            ▼
+ *   defect-stats   defect-samples       robot-arm      yield-chart   sort-stats
+ *   (计数/日志)    (拍照入库)           (联动剔除)      (工件追溯)     (码垛/剔除)
+ *                                                                          │
+ *                          ┌───────────────────────────────────────────────┘
+ *                          ▼
+ *                   analysis.js (诊断/工艺参数/优化建议)
+ *
+ *   defect-distribution.js ── 订阅 DEFECT ──▶ 工件序列缺陷分布（趋势分析）
  */
 
-import { initScale }           from './scale.js';
-import { startClock }          from './clock.js';
-import { initRgbCamera }       from './rgb-camera.js';
-import { initDefectDetect }    from './defect-detect.js';
+import { initScale }               from './scale.js';
+import { startClock }              from './clock.js';
+import { initRgbCamera }           from './rgb-camera.js';
+import { initDefectDetect }        from './defect-detect.js';
 import { initYieldChart,
-         redrawYieldChart }    from './yield-chart.js';
-import { drawAccChart }        from './accuracy-chart.js';
-import { initDefectStats }     from './defect-stats.js';
-import { initEquipment }       from './equipment.js';
-import { initSortStats }       from './sort-stats.js';
-import { startAnimationLoop }  from './animation-loop.js';
-import { $ }                   from './utils.js';
+         redrawYieldChart }        from './yield-chart.js';
+import { drawAccChart }            from './accuracy-chart.js';
+import { initDefectStats }         from './defect-stats.js';
+import { initEquipment }           from './equipment.js';
+import { initDefectSamples }       from './defect-samples.js';
+import { initRobotArm }            from './robot-arm.js';
+import { initDefectDistribution,
+         redrawDefectDistribution } from './defect-distribution.js';
+import { initAnalysis }            from './analysis.js';
+import { initSortStats }           from './sort-stats.js';
+import { startAnimationLoop }      from './animation-loop.js';
+import { initUIAnimations }        from './ui-animation.js';
+import { initControlCenter }       from './control-center.js';
+import { initControlBatch2 }       from './control-batch2.js';
+import { initControlBatch3 }       from './control-batch3.js';
+import { $ }                       from './utils.js';
 
 /**
  * 应用启动
@@ -45,29 +51,45 @@ function main() {
   // 2. 时钟
   startClock();
 
-  // 3. 初始化各业务模块
+  // 3. 初始化各业务模块（先建立事件订阅，再启动检测动画）
   initRgbCamera();
-  initDefectDetect();
   initDefectStats();
   initEquipment();
   initSortStats();
+  initDefectSamples();
+  initRobotArm();
+  initAnalysis();
+  initDefectDetect();   // 检测源最后初始化，确保订阅者已就绪
 
   // 4. 图表（延迟以等待 DOM 布局）
   const yieldCanvas = $('yieldCanvas');
   const accCanvas   = $('accCanvas');
+  const distCanvas  = $('distCanvas');
 
   initYieldChart(yieldCanvas);
+  initDefectDistribution(distCanvas);
 
   setTimeout(() => {
     drawAccChart(accCanvas);
     startAnimationLoop();
   }, 200);
 
-  // 5. resize 重绘静态图表
+  // 6. 交互控制中心（传送带/拍照/采集/检测/日志）
+  initControlCenter();
+  initControlBatch2();   // 第二批：调参/阈值/饼图/对比/监控/码垛/气缸/报警
+  initControlBatch3();   // 第三批：语音/文本检索/四模态联动/DIY布局/双屏联动
+
+  // 7. 界面入场动画（等柱状图初始高度 ~300ms 设置完成后再启动）
+  setTimeout(() => {
+    initUIAnimations();
+  }, 400);
+
+  // 5. resize 重绘静态/画布图表
   window.addEventListener('resize', () => {
     setTimeout(() => {
       drawAccChart(accCanvas);
       redrawYieldChart(yieldCanvas);
+      redrawDefectDistribution();
     }, 100);
   });
 }

@@ -6,11 +6,85 @@
  */
 
 import { RGB_CONFIG, DEFECT_TYPES } from './config.js';
-import { fitCanvas, pick, chance } from './utils.js';
+import { fitCanvas, pick, chance, randFloat, nowTimeString } from './utils.js';
+import { state } from './event-bus.js';
 
 // ========== 模块状态 ==========
 let blocks = [];
 let blockId = 0;
+let rgbCanvasRef = null;  // 保存画布引用，供拍照抓帧使用
+let beltPhase = 0;        // 传送带纹理相位：仅运行时推进，停机时纹理静止
+
+/**
+ * 抓拍当前 RGB 画面，返回 PNG dataURL
+ * 供「拍照 / 连续采集」使用——真实系统中对应 D435i 取一帧图像。
+ */
+export function captureRgbFrame() {
+  if (!rgbCanvasRef) return null;
+  try {
+    return rgbCanvasRef.toDataURL('image/png');
+  } catch (err) {
+    console.warn('[rgb-camera] 抓拍失败:', err);
+    return null;
+  }
+}
+
+/**
+ * 生成一张模拟的彩色工件照片（无实时画面时用离屏画布生成）
+ */
+function makeSimPhoto(workpieceId, isDefect, defectType) {
+  const c = document.createElement('canvas');
+  c.width = 320; c.height = 200;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 200);
+  g.addColorStop(0, '#2a3340'); g.addColorStop(1, '#111823');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 320, 200);
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  for (let y = 8; y < 200; y += 9) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(320, y); ctx.stroke();
+  }
+  // 焊缝
+  ctx.strokeStyle = 'rgba(190,210,235,0.35)'; ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.moveTo(20, 105); ctx.lineTo(300, 105); ctx.stroke();
+  // 工件
+  const bx = 90, by = 82, bw = 140, bh = 46;
+  const bg = ctx.createLinearGradient(bx, by, bx, by + bh);
+  bg.addColorStop(0, '#42A5F5'); bg.addColorStop(1, '#0D47A1');
+  ctx.fillStyle = bg; ctx.fillRect(bx, by, bw, bh);
+  if (isDefect && defectType) {
+    const info = DEFECT_TYPES[defectType];
+    ctx.strokeStyle = info.color; ctx.lineWidth = 2;
+    ctx.strokeRect(bx - 3, by - 3, bw + 6, bh + 6);
+    ctx.fillStyle = info.color; ctx.fillRect(bx - 3, by - 18, 96, 15);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px "Microsoft YaHei", sans-serif';
+    ctx.fillText(info.cn, bx + 2, by - 7);
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = '12px "Microsoft YaHei", sans-serif';
+  ctx.fillText(`#W${String(workpieceId).padStart(4, '0')}  ${nowTimeString()}`, 12, 185);
+  return c.toDataURL('image/png');
+}
+
+/**
+ * 连续采集 n 件工件（返回照片记录数组），不依赖传送带运行
+ */
+export function captureBatch(count) {
+  const shots = [];
+  for (let i = 0; i < count; i++) {
+    const workpieceId = state.workpieceSeq++;
+    const isDefect = chance(RGB_CONFIG.DEFECT_RATE);
+    const defectType = isDefect ? pick(['burn', 'lack', 'bite']) : null;
+    const dataUrl = captureRgbFrame() || makeSimPhoto(workpieceId, isDefect, defectType);
+    shots.push({
+      workpieceId,
+      type: defectType,
+      conf: isDefect ? randFloat(0.85, 0.98) : randFloat(0.92, 0.99),
+      dataUrl,
+      time: nowTimeString(),
+    });
+  }
+  return shots;
+}
 
 /**
  * 生成一个新方块
@@ -45,6 +119,7 @@ function initBlocks() {
  * @param {HTMLCanvasElement} canvas
  */
 export function drawRgbFrame(canvas) {
+  rgbCanvasRef = canvas;
   const { w, h } = fitCanvas(canvas);
   const ctx = canvas.getContext('2d');
 
@@ -65,10 +140,9 @@ export function drawRgbFrame(canvas) {
   ctx.fillStyle = '#1a1a1a';
   ctx.fillRect(0, beltY, w, beltH);
 
-  // 传送带纹理（滚动斜线）
-  ctx.strokeStyle = 'rgba(50,50,50,0.4)';
-  ctx.lineWidth = 1;
-  const beltOffset = (Date.now() * 0.05) % 20;
+  // 传送带纹理（滚动斜线）——停机时相位不推进，纹理静止
+  if (state.beltRunning) beltPhase += RGB_CONFIG.BLOCK_SPEED;
+  const beltOffset = beltPhase % 20;
   for (let i = -20; i < w + 20; i += 20) {
     ctx.beginPath();
     ctx.moveTo(i + beltOffset, beltY);
@@ -126,7 +200,8 @@ export function drawRgbFrame(canvas) {
   // ---------- 方块更新与绘制 ----------
   for (let bi = blocks.length - 1; bi >= 0; bi--) {
     const b = blocks[bi];
-    b.x += b.speed;
+    // 传送带停止时工件驻留，不再移动
+    if (state.beltRunning) b.x += b.speed;
     if (b.x > w + 60) {
       blocks.splice(bi, 1);
       continue;
@@ -201,14 +276,16 @@ export function drawRgbFrame(canvas) {
     }
   }
 
-  // ---------- 生成新方块 ----------
-  if (blocks.length > 0) {
-    const last = blocks[blocks.length - 1];
-    if (last.x >= RGB_CONFIG.BLOCK_GAP - RGB_CONFIG.BLOCK_W && blocks.length < RGB_CONFIG.MAX_VISIBLE) {
+  // ---------- 生成新方块（仅传送带运行时，停机不补件） ----------
+  if (state.beltRunning) {
+    if (blocks.length > 0) {
+      const last = blocks[blocks.length - 1];
+      if (last.x >= RGB_CONFIG.BLOCK_GAP - RGB_CONFIG.BLOCK_W && blocks.length < RGB_CONFIG.MAX_VISIBLE) {
+        spawnBlock();
+      }
+    } else {
       spawnBlock();
     }
-  } else {
-    spawnBlock();
   }
 
   // ---------- 扫描线 ----------
@@ -219,6 +296,27 @@ export function drawRgbFrame(canvas) {
   ctx.moveTo(inspectX, scanY);
   ctx.lineTo(inspectR, scanY);
   ctx.stroke();
+
+  // ---------- 相机参数：曝光（明暗） + 增益（噪点） ----------
+  // 曝光 <1 叠暗、>1 叠亮；增益越高噪点越明显。真实反映调参对成像的影响。
+  const exposure = state.exposure ?? 1;
+  const gain = state.gain ?? 1;
+  if (exposure < 1) {
+    ctx.fillStyle = `rgba(0,0,0,${((1 - exposure) * 0.7).toFixed(3)})`;
+    ctx.fillRect(0, 0, w, h);
+  } else if (exposure > 1) {
+    ctx.fillStyle = `rgba(255,255,255,${((exposure - 1) * 0.45).toFixed(3)})`;
+    ctx.fillRect(0, 0, w, h);
+  }
+  if (gain > 1) {
+    const noiseN = Math.round((gain - 1) * 260);
+    for (let n = 0; n < noiseN; n++) {
+      const nx = (Math.random() * w) | 0;
+      const ny = (Math.random() * h) | 0;
+      ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.22)';
+      ctx.fillRect(nx, ny, 1.5, 1.5);
+    }
+  }
 }
 
 /**

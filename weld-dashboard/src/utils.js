@@ -105,3 +105,12 @@ export function hexToRgba(hex, alpha) {
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${alpha})`;
 }
+
+/**
+ * 格式化工件编号：#W1342
+ * @param {number} seq 工件流水号
+ * @returns {string}
+ */
+export function fmtWorkpiece(seq) {
+  return `#W${String(seq).padStart(4, '0')}`;
+}
